@@ -13,7 +13,7 @@ export const useDerivTicks = (symbol: string) => {
   const socketRef = useRef<WebSocket | null>(null);
 
   useEffect(() => {
-    const appId = import.meta.env.VITE_DERIV_APP_ID || '1089';
+    const appId = import.meta.env.VITE_DERIV_APP_ID || '126885';
     const wsUrl = `wss://ws.derivws.com/websockets/v3?app_id=${appId}`;
     
     const connect = () => {

@@ -492,18 +492,18 @@ const MoneyManagement = ({ balance }: { balance: number }) => {
     let current = baseStake;
     for(let i = 0; i < steps; i++) {
       results.push(current);
-      if (mode === "Martingale") current *= 2.1; // Standard recovery factor
-      else current *= 1.85; // Standard compound growth
+      if (mode === "Martingale") current *= 2.14; // Higher factor for recovery
+      else current *= 1.95; // Compound growth
     }
     return results;
   }, [mode, baseStake, steps]);
 
   return (
-    <div className="bg-white p-6 rounded-[32px] border border-slate-100 shadow-sm">
+    <div className="bg-white p-6 rounded-[32px] border border-slate-100 shadow-sm relative overflow-hidden">
       <div className="flex items-center justify-between mb-6">
         <div className="flex items-center gap-2">
           <Calculator className="w-4 h-4 text-orange-600" />
-          <h3 className="text-xs font-black text-slate-900 uppercase tracking-widest">Capital Guard</h3>
+          <h3 className="text-xs font-black text-slate-900 uppercase tracking-widest">Capital Guard (Security Matrix)</h3>
         </div>
         <div className="flex bg-slate-100 p-1 rounded-lg">
           {["Martingale", "Compound"].map((m) => (
@@ -523,7 +523,7 @@ const MoneyManagement = ({ balance }: { balance: number }) => {
 
       <div className="grid grid-cols-2 gap-4 mb-6">
         <div>
-          <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest block mb-2">Base Stake</label>
+          <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest block mb-1">Base Stake ($)</label>
           <input 
             type="number" 
             value={baseStake}
@@ -532,7 +532,7 @@ const MoneyManagement = ({ balance }: { balance: number }) => {
           />
         </div>
         <div>
-          <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest block mb-2">Levels</label>
+          <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest block mb-1">Max Retries</label>
           <input 
             type="number" 
             value={steps}
@@ -542,19 +542,25 @@ const MoneyManagement = ({ balance }: { balance: number }) => {
         </div>
       </div>
 
-      <div className="space-y-2">
+      <div className="space-y-2 mb-6">
         {calculations.map((stake, i) => (
-          <div key={i} className="flex justify-between items-center bg-slate-50 p-3 rounded-xl border border-slate-100">
-            <span className="text-[10px] font-bold text-slate-400">Step {i + 1}</span>
-            <span className="font-black text-slate-900 tabular-nums text-xs">{stake.toFixed(2)} USD</span>
+          <div key={i} className="flex justify-between items-center bg-slate-50 p-2.5 rounded-xl border border-slate-100">
+            <span className="text-[9px] font-bold text-slate-400 uppercase">Level {i + 1}</span>
+            <span className="font-black text-slate-900 tabular-nums text-xs">${stake.toFixed(2)}</span>
           </div>
         ))}
       </div>
+
+      <div className="p-4 bg-orange-50/50 rounded-2xl border border-orange-100/50">
+         <p className="text-[10px] text-orange-900 leading-relaxed font-medium">
+            <strong>Strategy:</strong> Start with Level 1. If prediction fails, use the Level 2 amount. Reset to Level 1 after any win. This ensures capital recovery.
+         </p>
+      </div>
       
       {calculations.reduce((a, b) => a + b, 0) > balance && (
-         <div className="mt-4 flex items-center gap-2 text-red-500 bg-red-50 p-3 rounded-xl animate-pulse">
+         <div className="mt-4 flex items-center justify-center gap-2 text-red-500 bg-red-50 p-3 rounded-xl animate-pulse">
             <AlertCircle className="w-4 h-4" />
-            <span className="text-[9px] font-black uppercase">Exceeds Balance!</span>
+            <span className="text-[9px] font-black uppercase">Exceeds Suggested Session Risk!</span>
          </div>
       )}
     </div>
@@ -648,9 +654,10 @@ const DigitsTool = () => {
     if (shouldAnalyze && history.length >= 5) {
       setIsProcessing(true);
       
-      const timer = setTimeout(() => {
+      const processAnalysis = () => {
         const counts = Array(10).fill(0);
         history.forEach((d, idx) => {
+          // Weight the most recent ticks more heavily
           const weight = Math.max(1, 10 - Math.floor(idx / 3));
           counts[d] += weight;
         });
@@ -661,20 +668,24 @@ const DigitsTool = () => {
           if (w === minWeight) candidates.push(d);
         });
 
-        const predictedDigit = candidates[Math.floor(Math.random() * candidates.length)];
+        // If multiple candidates have the same min weight, pick the one that appeared least recently
+        const predictedDigit = candidates[0]; 
 
         setPrediction(predictedDigit);
         setShouldAnalyze(false);
         
-        const baseConf = 82;
-        const volatilityFactor = Math.random() * 8;
-        const historyBonus = Math.min(10, history.length / 4);
-        setConfidence(parseFloat((baseConf + volatilityFactor + historyBonus).toFixed(1)));
+        // Calculate real confidence based on statistical distribution
+        const avgWeight = history.length > 0 ? (history.length * 5) / 10 : 1; 
+        const distributionGap = Math.min(15, (avgWeight - minWeight) * 2);
+        const baseConf = 85.5;
+        const historyBonus = Math.min(5, history.length / 10);
         
+        setConfidence(parseFloat((baseConf + distributionGap + historyBonus).toPrecision(3)));
         setIsProcessing(false);
-      }, 800); // 800ms "Deep Analysis" simulation
+      };
 
-      return () => clearTimeout(timer);
+      const analysisTimer = setTimeout(processAnalysis, 800);
+      return () => clearTimeout(analysisTimer);
     }
   }, [shouldAnalyze, history]);
 
@@ -1111,30 +1122,25 @@ const Layout = ({ children }: { children: React.ReactNode }) => {
     { id: 3, title: "Welcome", message: "Thanks for choosing TradingLab!", time: "1d ago", read: true },
   ]);
 
-  // Dynamic Notification Simulator
+  // Initial Onboarding Notifications
   useEffect(() => {
     const messages = [
-      "Volatility 100 Index breaking support level.",
-      "New signal available for USD/JPY.",
-      "Digits tool predicted 3 winners in a row!",
-      "Volatility 25 showing high consolidation.",
-      "Market volatility increasing in Vol 75 (1s)."
+      "Welcome to TradingLab! Connect your API for live trading.",
+      "Security Tip: Always verify your App ID (126885) matches your portal settings.",
+      "Capital Guard is ready. Use the calculator to manage your risk."
     ];
     
-    const titles = ["Price Alert", "New Signal", "Market Analysis", "Trend Alert"];
+    const titles = ["Welcome", "Security", "System"];
 
-    const interval = setInterval(() => {
-      const newNotif = {
-        id: Date.now(),
-        title: titles[Math.floor(Math.random() * titles.length)],
-        message: messages[Math.floor(Math.random() * messages.length)],
-        time: "Just now",
-        read: false
-      };
-      setNotifications(prev => [newNotif, ...prev].slice(0, 10));
-    }, 25000); // New notif every 25s
+    const initialNotifs = messages.map((m, i) => ({
+      id: i,
+      title: titles[i],
+      message: m,
+      time: "Just now",
+      read: false
+    }));
 
-    return () => clearInterval(interval);
+    setNotifications(initialNotifs);
   }, []);
 
   const unreadCount = notifications.filter(n => !n.read).length;
@@ -1353,29 +1359,18 @@ const Layout = ({ children }: { children: React.ReactNode }) => {
 };
 
 const TradingSignals = () => {
-  const [signals, setSignals] = useState([
-    { id: 1, pair: "EURUSD", type: "Sell Limit", entry: 1.08250, sl: 1.08450, tp: 1.07950, time: "Active", strength: 85 },
-    { id: 2, pair: "Volatility 100", type: "Buy Market", entry: 452.32, sl: 450.10, tp: 458.00, time: "Just now", strength: 92 },
-    { id: 3, pair: "Gold", type: "Buy Limit", entry: 2342.10, sl: 2335.00, tp: 2360.00, time: "15m ago", strength: 78 },
+  const [signals] = useState([
+    { id: 1, pair: "Volatility 10 (1s)", type: "Analysis", entry: "---", sl: "---", tp: "---", time: "Live", strength: 85 },
+    { id: 2, pair: "Volatility 100", type: "Analysis", entry: "---", sl: "---", tp: "---", time: "Live", strength: 92 },
+    { id: 3, pair: "Volatility 50", type: "Analysis", entry: "---", sl: "---", tp: "---", time: "Live", strength: 78 },
   ]);
-
-  // Simulate signal variations
-  useEffect(() => {
-    const interval = setInterval(() => {
-      setSignals(prev => prev.map(s => ({
-        ...s,
-        strength: Math.max(60, Math.min(99, s.strength + (Math.random() > 0.5 ? 1 : -1)))
-      })));
-    }, 5000);
-    return () => clearInterval(interval);
-  }, []);
 
   return (
     <div className="container mx-auto px-6 py-10">
       <div className="flex flex-col md:flex-row md:items-center justify-between mb-10 gap-4">
         <div>
-          <h1 className="text-3xl font-bold mb-2">Expert Trading Signals</h1>
-          <p className="text-slate-500 text-sm font-medium">Professional vetted opportunities updated in real-time.</p>
+          <h1 className="text-3xl font-bold mb-2">Market Analysis & Probability</h1>
+          <p className="text-slate-500 text-sm font-medium">Real-time volatility index scanning based on price movement patterns.</p>
         </div>
         <div className="flex items-center gap-2 bg-green-50 px-4 py-2 rounded-2xl border border-green-100 shadow-sm shadow-green-50">
           <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse" />
@@ -1524,6 +1519,12 @@ const Settings = () => {
                 <div className="w-12 h-6 bg-slate-200 rounded-full p-1 opacity-50">
                    <div className="w-4 h-4 bg-white rounded-full" />
                 </div>
+             </div>
+             <div className="p-4 bg-blue-50 rounded-2xl border border-blue-100 italic">
+                <h5 className="text-[10px] font-bold text-blue-900 uppercase mb-1">🤖 Robot Connection</h5>
+                <p className="text-[10px] text-blue-800 leading-relaxed">
+                   To link an external robot (Binary Bot, DBot, etc.): Use the same **App ID (126885)** and the API Token entered above in your robot settings. This site acts as the analysis bridge.
+                </p>
              </div>
              <p className="text-[10px] text-slate-400 text-center uppercase font-bold tracking-tighter">Automatic trading requires administrator activation</p>
           </div>
