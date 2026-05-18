@@ -1,0 +1,91 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    
+    // -------------------------------------------------------------------------
+    // GLOBAL HELPERS
+    // -------------------------------------------------------------------------
+    
+    function isSignedIn() {
+      return request.auth != null;
+    }
+    
+    function isOwner(userId) {
+      return isSignedIn() && request.auth.uid == userId;
+    }
+    
+    function isValidId(id) {
+      return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+    
+    function incoming() {
+      return request.resource.data;
+    }
+    
+    function existing() {
+      return resource.data;
+    }
+    
+    // -------------------------------------------------------------------------
+    // VALIDATION BLUEPRINTS
+    // -------------------------------------------------------------------------
+    
+    function isValidUser(data) {
+      return data.keys().hasAll(['uid', 'email', 'createdAt', 'updatedAt']) &&
+             data.keys().size() <= 9 && // accommodate optional fields
+             data.uid == request.auth.uid &&
+             data.email is string &&
+             data.createdAt == request.time &&
+             data.updatedAt == request.time;
+    }
+    
+    function isValidTrade(data) {
+       return data.keys().hasAll(['userId', 'pair', 'type', 'amount', 'result', 'timestamp']) &&
+             data.keys().size() <= 7 &&
+             data.userId == request.auth.uid &&
+             data.pair is string &&
+             data.pair.size() <= 100 &&
+             data.amount is number &&
+             data.amount >= 0 &&
+             data.type in ['CALL', 'PUT', 'MATCH', 'DIFF'] &&
+             data.result in ['WIN', 'LOSS'] &&
+             data.timestamp == request.time;
+    }
+    
+    function isValidWatchlist(data) {
+      return data.keys().hasAll(['userId', 'indices']) &&
+             data.userId == request.auth.uid &&
+             data.indices is list &&
+             data.indices.size() <= 50;
+    }
+
+    // Default Deny
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // User collection
+    match /users/{userId} {
+      allow get: if isOwner(userId);
+      allow create: if isSignedIn() && isValidId(userId) && isValidUser(incoming());
+      allow update: if isOwner(userId) && 
+                      isValidUser(incoming()) && 
+                      incoming().uid == existing().uid &&
+                      incoming().createdAt == existing().createdAt &&
+                      incoming().diff(existing()).affectedKeys().hasOnly(['email', 'displayName', 'photoURL', 'dailyGoal', 'winsTarget', 'currency', 'updatedAt']);
+      
+      // Sub-collections
+      match /trades/{tradeId} {
+        allow list: if isOwner(userId);
+        allow create: if isOwner(userId) && isValidId(tradeId) && isValidTrade(incoming());
+        // Trades are immutable after generation for integrity
+        allow read: if isOwner(userId);
+      }
+      
+      match /watchlist/default {
+        allow get: if isOwner(userId);
+        allow write: if isOwner(userId) && isValidWatchlist(incoming());
+      }
+    }
+  }
+}

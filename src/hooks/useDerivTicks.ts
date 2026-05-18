@@ -45,8 +45,10 @@ export const useDerivTicks = (symbol: string) => {
 
       socket.onclose = () => {
         setIsConnected(false);
-        // Reconnect after 3 seconds
-        setTimeout(connect, 3000);
+        // Reconnect after 3 seconds if not explicitly closed by us
+        if (socketRef.current === socket) {
+          setTimeout(connect, 3000);
+        }
       };
 
       socket.onerror = () => {

@@ -1,0 +1,60 @@
+{
+  "entities": {
+    "User": {
+      "title": "User Profile",
+      "description": "Stores user settings and preferences.",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string", "description": "Unique identifier for the user" },
+        "email": { "type": "string", "format": "email" },
+        "displayName": { "type": "string" },
+        "photoURL": { "type": "string" },
+        "dailyGoal": { "type": "number", "description": "Daily profit goal in USD" },
+        "winsTarget": { "type": "number", "description": "Target number of wins per session" },
+        "currency": { "type": "string", "enum": ["USD", "EUR", "GBP"], "description": "Preferred trading currency" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["uid", "email", "createdAt", "updatedAt"]
+    },
+    "TradeHistory": {
+      "title": "Trade Record",
+      "description": "Records of individual trades performed by the user.",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string", "description": "Reference to the User" },
+        "pair": { "type": "string", "description": "Trading pair or index (e.g., Volatility 10 (1s))" },
+        "type": { "type": "string", "enum": ["CALL", "PUT", "MATCH", "DIFF"], "description": "Type of trade" },
+        "amount": { "type": "number" },
+        "result": { "type": "string", "enum": ["WIN", "LOSS"], "description": "Outcome of the trade" },
+        "digitPrediction": { "type": "number", "description": "Predicted digit if applicable" },
+        "timestamp": { "type": "string", "format": "date-time" }
+      },
+      "required": ["userId", "pair", "type", "amount", "result", "timestamp"]
+    },
+    "Watchlist": {
+      "title": "User Watchlist",
+      "description": "A list of indices a user is watching.",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "indices": { "type": "array", "items": { "type": "string" } }
+      },
+      "required": ["userId", "indices"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": "User",
+      "description": "User profiles and settings"
+    },
+    "/users/{userId}/trades/{tradeId}": {
+      "schema": "TradeHistory",
+      "description": "User's individual trade logs"
+    },
+    "/users/{userId}/watchlist/default": {
+      "schema": "Watchlist",
+      "description": "User's default watchlist"
+    }
+  }
+}

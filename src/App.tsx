@@ -1,5 +1,5 @@
-import React, { useState, useEffect, useMemo } from "react";
-import { BrowserRouter as Router, Routes, Route, Link, useLocation } from "react-router-dom";
+import React, { useState, useEffect, useMemo, createContext, useContext } from "react";
+import { BrowserRouter as Router, Routes, Route, Link, useLocation, Navigate } from "react-router-dom";
 import { 
   BarChart3, 
   Menu, 
@@ -22,8 +22,8 @@ import {
   CheckCircle2,
   AlertCircle,
   Phone,
-  User,
-  History,
+  User as UserIcon,
+  History as HistoryIcon,
   HelpCircle,
   Moon,
   Sun,
@@ -32,11 +32,19 @@ import {
   Target,
   Calculator,
   LineChart,
-  Lock
+  Lock,
+  LogIn
 } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
 import { cn } from "@/src/lib/utils";
 import { useDerivTicks } from "@/src/hooks/useDerivTicks";
+import { auth, loginWithGoogle, logout } from "@/src/lib/firebase";
+import { onAuthStateChanged, User } from "firebase/auth";
+import { ensureUserProfile, saveTrade, getTradeHistory } from "@/src/lib/firestore";
+
+// Authentication Context
+const AuthContext = createContext<{ user: User | null; loading: boolean }>({ user: null, loading: true });
+const useAuth = () => useContext(AuthContext);
 
 // Pages placeholder
 const Home = () => {
@@ -637,6 +645,15 @@ const DigitsTool = () => {
           time: new Date().toLocaleTimeString()
         };
 
+        // Persistent Save
+        saveTrade({
+          pair: selectedIndexLabel,
+          type: strategy === "matches" ? "MATCH" : "DIFF",
+          amount: 1, // Base amount for statistics
+          result: won ? "WIN" : "LOSS",
+          digitPrediction: prediction,
+        }).catch(err => console.error("Could not save to cloud", err));
+
         setLastResult(newResult);
         setResultsHistory(prev => [newResult, ...prev].slice(0, 50));
         setStatsSummary(prev => ({
@@ -676,11 +693,15 @@ const DigitsTool = () => {
         
         // Calculate real confidence based on statistical distribution
         const avgWeight = history.length > 0 ? (history.length * 5) / 10 : 1; 
-        const distributionGap = Math.min(15, (avgWeight - minWeight) * 2);
-        const baseConf = 85.5;
-        const historyBonus = Math.min(5, history.length / 10);
+        const distributionGap = Math.min(10, (avgWeight - minWeight) * 1.5);
+        const baseConf = 82.5;
+        const historyBonus = Math.min(5, history.length / 15);
         
-        setConfidence(parseFloat((baseConf + distributionGap + historyBonus).toPrecision(3)));
+        let finalConfidence = baseConf + distributionGap + historyBonus;
+        // Cap at 99.4% for realism
+        if (finalConfidence > 99.4) finalConfidence = 99.4;
+        
+        setConfidence(parseFloat(finalConfidence.toFixed(1)));
         setIsProcessing(false);
       };
 
@@ -1143,17 +1164,21 @@ const Layout = ({ children }: { children: React.ReactNode }) => {
     setNotifications(initialNotifs);
   }, []);
 
-  const unreadCount = notifications.filter(n => !n.read).length;
+  const [unreadCount, setUnreadCount] = useState(0);
+  const { user, loading } = useAuth();
+
+  useEffect(() => {
+    const unread = notifications.filter(n => !n.read).length;
+    setUnreadCount(unread);
+  }, [notifications]);
 
   const menuItems = [
-    { name: "Deriv Expert", icon: Bot, path: "/dashboard", active: true },
-    { name: "Trader's Hub", icon: LayoutDashboard, path: "/dashboard" },
-    { name: "Digits Tool", icon: Cpu, path: "/digits-tool" },
-    { name: "Trading Signals", icon: Zap, path: "/signals" },
-    { name: "API Settings", icon: Lock, path: "/settings" },
-    { name: "Account Details", icon: User, path: "/signin" },
-    { name: "Reports", icon: BarChart3, path: "/dashboard" },
-    { name: "Help Center", icon: HelpCircle, path: "/terms" },
+    { name: "Market Overview", icon: Bot, path: "/dashboard", public: false },
+    { name: "Digits Analytics", icon: Cpu, path: "/digits-tool", public: false },
+    { name: "Trade Signals", icon: Zap, path: "/signals", public: false },
+    { name: "Global History", icon: HistoryIcon, path: "/history", public: false },
+    { name: "Secure Settings", icon: Lock, path: "/settings", public: false },
+    { name: "Terms of Service", icon: HelpCircle, path: "/terms", public: true },
   ];
 
   return (
@@ -1259,8 +1284,29 @@ const Layout = ({ children }: { children: React.ReactNode }) => {
                 )}
               </AnimatePresence>
             </div>
-            <div className="w-8 h-8 bg-red-600 rounded-full flex items-center justify-center font-bold text-sm shadow-md">
-              U
+            <div className="relative">
+              {user ? (
+                <div className="flex items-center gap-3">
+                   <div className="hidden sm:flex flex-col items-end mr-2">
+                      <span className="text-[10px] font-black text-white uppercase">{user.displayName}</span>
+                      <span className="text-[8px] font-bold text-slate-400">PRO ACCOUNT</span>
+                   </div>
+                   <button 
+                     onClick={logout}
+                     className="w-10 h-10 rounded-full border-2 border-red-600/30 overflow-hidden hover:border-red-600 transition-all shadow-lg"
+                   >
+                     <img src={user.photoURL || `https://ui-avatars.com/api/?name=${user.displayName}`} className="w-full h-full object-cover" alt="User" />
+                   </button>
+                </div>
+              ) : (
+                <button 
+                  onClick={loginWithGoogle}
+                  className="flex items-center gap-2 px-4 py-2 bg-orange-600 text-white rounded-xl font-bold text-[10px] uppercase tracking-widest hover:bg-orange-700 transition-all shadow-lg shadow-orange-900/20"
+                >
+                  <LogIn className="w-4 h-4" />
+                  Connect
+                </button>
+              )}
             </div>
           </div>
         </div>
@@ -1298,31 +1344,40 @@ const Layout = ({ children }: { children: React.ReactNode }) => {
 
               <div className="flex-grow py-4 overflow-y-auto">
                 <div className="px-6 mb-6">
-                  <div className="bg-white/5 p-4 rounded-xl border border-white/5 flex items-center gap-4">
-                    <div className="w-10 h-10 bg-red-600 rounded-full flex items-center justify-center font-bold">U</div>
-                    <div className="overflow-hidden">
-                      <p className="font-bold text-sm truncate">User 0984149068</p>
-                      <p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest">Active Member</p>
+                  {user ? (
+                    <div className="bg-white/5 p-4 rounded-xl border border-white/5 flex items-center gap-4">
+                      <img src={user.photoURL || `https://ui-avatars.com/api/?name=${user.displayName}`} className="w-10 h-10 rounded-full border border-red-600" alt="Profile" />
+                      <div className="overflow-hidden">
+                        <p className="font-bold text-sm truncate">{user.displayName}</p>
+                        <p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest">Verified Trader</p>
+                      </div>
                     </div>
-                  </div>
+                  ) : (
+                    <button 
+                      onClick={loginWithGoogle}
+                      className="w-full py-4 bg-orange-600 text-white rounded-xl font-bold text-sm"
+                    >
+                      Login with Google
+                    </button>
+                  )}
                 </div>
 
                 <div className="px-3 space-y-1">
-                  {menuItems.map((item, idx) => (
+                  {menuItems.filter(item => item.public || user).map((item, idx) => (
                     <Link
                       key={idx}
                       to={item.path}
                       onClick={() => setIsSidebarOpen(false)}
                       className={cn(
                         "flex items-center gap-4 px-4 py-3.5 rounded-xl font-bold text-sm transition-all group",
-                        item.active 
+                        location.pathname === item.path
                           ? "bg-red-600 text-white shadow-lg shadow-red-900/40" 
                           : "text-slate-400 hover:bg-white/5 hover:text-white"
                       )}
                     >
                       <item.icon className="w-5 h-5" />
                       {item.name}
-                      {item.active && <ChevronRight className="w-4 h-4 ml-auto" />}
+                      {location.pathname === item.path && <ChevronRight className="w-4 h-4 ml-auto" />}
                     </Link>
                   ))}
                 </div>
@@ -1341,9 +1396,12 @@ const Layout = ({ children }: { children: React.ReactNode }) => {
                     <div className={cn("w-3 h-3 bg-white rounded-full transition-transform", isDarkMode ? "translate-x-5" : "translate-x-0")} />
                   </div>
                 </button>
-                <button className="flex items-center gap-4 w-full px-4 py-3 hover:bg-red-900/20 text-red-500 rounded-xl font-bold text-sm transition-all">
+                <button 
+                  onClick={() => { logout(); setIsSidebarOpen(false); }}
+                  className="flex items-center gap-4 w-full px-4 py-3 hover:bg-red-900/20 text-red-500 rounded-xl font-bold text-sm transition-all"
+                >
                   <LogOut className="w-5 h-5" />
-                  Logout
+                  Logout Account
                 </button>
               </div>
             </motion.div>
@@ -1359,11 +1417,22 @@ const Layout = ({ children }: { children: React.ReactNode }) => {
 };
 
 const TradingSignals = () => {
-  const [signals] = useState([
+  const [signals, setSignals] = useState([
     { id: 1, pair: "Volatility 10 (1s)", type: "Analysis", entry: "---", sl: "---", tp: "---", time: "Live", strength: 85 },
     { id: 2, pair: "Volatility 100", type: "Analysis", entry: "---", sl: "---", tp: "---", time: "Live", strength: 92 },
     { id: 3, pair: "Volatility 50", type: "Analysis", entry: "---", sl: "---", tp: "---", time: "Live", strength: 78 },
   ]);
+
+  // Dynamic strength simulation for realistic scanning impression
+  useEffect(() => {
+    const interval = setInterval(() => {
+      setSignals(prev => prev.map(s => ({
+        ...s,
+        strength: Math.min(99.4, Math.max(65, s.strength + (Math.random() > 0.5 ? 0.3 : -0.3)))
+      })));
+    }, 3000);
+    return () => clearInterval(interval);
+  }, []);
 
   return (
     <div className="container mx-auto px-6 py-10">
@@ -1544,16 +1613,124 @@ const Settings = () => {
   );
 };
 
-export default function App() {
+const ProtectedRoute = ({ children }: { children: React.ReactNode }) => {
+  const { user, loading } = useAuth();
+  if (loading) return (
+     <div className="min-h-screen bg-[#151717] flex items-center justify-center">
+        <div className="w-12 h-12 border-4 border-red-600 border-t-transparent rounded-full animate-spin" />
+     </div>
+  );
+  if (!user) return <Home />;
+  return <>{children}</>;
+};
+
+const HistoryPage = () => {
+  const [history, setHistory] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    getTradeHistory().then(data => {
+      setHistory(data);
+      setLoading(false);
+    });
+  }, []);
+
   return (
+    <div className="container mx-auto px-6 py-12 max-w-4xl min-h-[80vh]">
+      <div className="flex items-center justify-between mb-12">
+        <div>
+          <h1 className="text-3xl font-black text-slate-900 flex items-center gap-3">
+            <HistoryIcon className="w-8 h-8 text-red-600" />
+            Security Ledger
+          </h1>
+          <p className="text-slate-500 text-xs font-bold mt-1 uppercase tracking-widest">Global Trade Synchronization</p>
+        </div>
+        <div className="text-[10px] font-black text-white bg-slate-900 px-6 py-2.5 rounded-2xl border border-white/5 shadow-xl">
+           {history.length} TRADES COMMITTED
+        </div>
+      </div>
+
+      <div className="space-y-4">
+        {loading ? (
+          <div className="py-20 text-center">
+             <div className="w-10 h-10 border-2 border-red-600 border-t-transparent rounded-full animate-spin mx-auto mb-4" />
+             <p className="text-slate-400 font-bold uppercase text-[8px] tracking-[4px]">Retrieving record node...</p>
+          </div>
+        ) : history.length === 0 ? (
+          <div className="py-20 text-center bg-white rounded-[40px] border border-slate-100 shadow-inner">
+             <Bot className="w-16 h-16 mx-auto text-slate-100 mb-6" />
+             <p className="text-slate-400 font-black uppercase text-[10px] tracking-widest">No cloud records found</p>
+          </div>
+        ) : (
+          history.map((trade, i) => (
+            <motion.div 
+              initial={{ opacity: 0, y: 10 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ delay: i * 0.05 }}
+              key={trade.id} 
+              className="bg-white p-6 rounded-[32px] border border-slate-100 flex items-center justify-between group hover:shadow-2xl hover:border-orange-100 transition-all cursor-default"
+            >
+              <div className="flex items-center gap-6">
+                <div className={cn(
+                  "w-14 h-14 rounded-2xl flex items-center justify-center font-black text-xl shadow-lg transition-transform group-hover:scale-110",
+                  trade.result === "WIN" ? "bg-green-100 text-green-600 shadow-green-100/50" : "bg-red-100 text-red-600 shadow-red-100/50"
+                )}>
+                  {trade.digitPrediction ?? "!"}
+                </div>
+                <div>
+                   <h4 className="font-bold text-slate-900 text-lg">{trade.pair}</h4>
+                   <p className="text-[10px] text-slate-500 font-bold flex items-center gap-2">
+                     <Clock className="w-3 h-3" />
+                     {trade.timestamp?.toDate ? new Date(trade.timestamp.toDate()).toLocaleString() : "Syncing..."}
+                   </p>
+                </div>
+              </div>
+              <div className="flex items-center gap-12">
+                 <div className="text-right hidden xs:block">
+                    <div className="text-[8px] font-black text-slate-400 uppercase tracking-widest mb-1">STAKE AMOUNT</div>
+                    <div className="font-black text-slate-900">${trade.amount?.toFixed(2)}</div>
+                 </div>
+                 <div className={cn(
+                   "px-6 py-3 rounded-2xl text-[10px] font-black uppercase tracking-[2px] shadow-sm",
+                   trade.result === "WIN" ? "bg-green-500 text-white shadow-green-200" : "bg-red-500 text-white shadow-red-200"
+                 )}>
+                   {trade.result}
+                 </div>
+              </div>
+            </motion.div>
+          ))
+        )}
+      </div>
+    </div>
+  );
+};
+
+export default function App() {
+  const [user, setUser] = useState<User | null>(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    const unsubscribe = onAuthStateChanged(auth, (u) => {
+      setUser(u);
+      setLoading(false);
+      if (u) {
+        ensureUserProfile(u);
+      }
+    });
+    return () => unsubscribe();
+  }, []);
+
+  return (
+    <AuthContext.Provider value={{ user, loading }}>
     <Router>
       <Layout>
         <Routes>
           <Route path="/" element={<Home />} />
-          <Route path="/dashboard" element={<Dashboard />} />
-          <Route path="/digits-tool" element={<DigitsTool />} />
-          <Route path="/signals" element={<TradingSignals />} />
-          <Route path="/settings" element={<Settings />} />
+          <Route path="/dashboard" element={<ProtectedRoute><Dashboard /></ProtectedRoute>} />
+          <Route path="/digits-tool" element={<ProtectedRoute><DigitsTool /></ProtectedRoute>} />
+          <Route path="/signals" element={<ProtectedRoute><TradingSignals /></ProtectedRoute>} />
+          <Route path="/history" element={<ProtectedRoute><HistoryPage /></ProtectedRoute>} />
+          <Route path="/settings" element={<ProtectedRoute><Settings /></ProtectedRoute>} />
           <Route path="/signin" element={
             <div className="min-h-[80vh] flex items-center justify-center px-6">
                <div className="w-full max-w-md bg-white p-10 rounded-[40px] shadow-2xl border border-slate-100">
@@ -1600,26 +1777,42 @@ export default function App() {
                </div>
             </div>
           } />
-          <Route path="/terms" element={
-            <div className="container mx-auto px-6 py-16 max-w-4xl">
-              <h1 className="text-4xl font-bold mb-8">Terms & Conditions</h1>
-              <div className="prose prose-slate max-w-none space-y-6 text-slate-600">
-                <p className="text-lg leading-relaxed">
-                  Welcome to TradingLab. By accessing our platform, you agree to comply with the following terms and conditions.
-                </p>
-                <h2 className="text-2xl font-bold text-slate-900 mt-10">1. Trading Risk</h2>
-                <p>
-                  Trading in financial instruments involves substantial risk of loss. Our tools and signals are provided for informational and educational purposes only. Past performance is not indicative of future results.
-                </p>
-                <h2 className="text-2xl font-bold text-slate-900 mt-10">2. Platform Access</h2>
-                <p>
-                  Access to our advanced tools, including the Digits Prediction Engine, is granted upon subscription or trial. We reserve the right to modify or discontinue services without notice.
-                </p>
-              </div>
-            </div>
-          } />
-        </Routes>
-      </Layout>
-    </Router>
+            <Route path="/terms" element={<TermsPage />} />
+            <Route path="*" element={<Navigate to="/" replace />} />
+          </Routes>
+        </Layout>
+      </Router>
+    </AuthContext.Provider>
   );
 }
+
+const TermsPage = () => (
+  <div className="container mx-auto px-6 py-16 max-w-4xl">
+    <h1 className="text-4xl font-black mb-8 text-slate-900">Legal Architecture</h1>
+    <div className="prose prose-slate max-w-none space-y-6 text-slate-600">
+      <p className="text-lg leading-relaxed font-medium">
+        Welcome to TradingLab. By accessing our platform, you agree to comply with the following risk-aware protocols.
+      </p>
+      
+      <div className="bg-orange-50 p-8 rounded-[32px] border border-orange-100">
+        <h2 className="text-xl font-bold text-orange-900 mb-4 flex items-center gap-3">
+          <Shield className="w-6 h-6" />
+          1. Mandatory Risk Disclosure
+        </h2>
+        <p className="text-orange-800/80 leading-relaxed">
+          Trading in financial instruments involves substantial risk of capital loss. Our predictive engines and signals are provided for analytical purposes only. Past performance metrics generated by our IA models are not a guarantee of future outcomes.
+        </p>
+      </div>
+
+      <h2 className="text-2xl font-bold text-slate-900 mt-12">2. Intelligent Access Control</h2>
+      <p>
+        Access to our advanced toolset, including the Digits Prediction Matrix, is gated by our security firewall. We reserve the right to suspend or terminate node access for accounts suspected of malicious bot activity or unauthorized scraping.
+      </p>
+
+      <h2 className="text-2xl font-bold text-slate-900 mt-12">3. User Responsibility</h2>
+      <p>
+        You are solely responsible for the security of your synchronized account data and API tokens. TradingLab acts only as a visualization and prediction layer; we never handle your actual funds or execute trades directly.
+      </p>
+    </div>
+  </div>
+);
