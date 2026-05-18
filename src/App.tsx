@@ -40,10 +40,35 @@ import { cn } from "@/src/lib/utils";
 import { useDerivTicks } from "@/src/hooks/useDerivTicks";
 import { auth, loginWithGoogle, logout } from "@/src/lib/firebase";
 import { onAuthStateChanged, User } from "firebase/auth";
-import { ensureUserProfile, saveTrade, getTradeHistory } from "@/src/lib/firestore";
+import { ensureUserProfile, saveTrade, getTradeHistory, getUserProfile } from "@/src/lib/firestore";
 
 // Authentication Context
 const AuthContext = createContext<{ user: User | null; loading: boolean }>({ user: null, loading: true });
+
+// Authentication Provider
+const AuthProvider = ({ children }: { children: React.ReactNode }) => {
+  const [user, setUser] = useState<User | null>(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    const unsubscribe = onAuthStateChanged(auth, (u) => {
+      setUser(u);
+      setLoading(false);
+      if (u) {
+        ensureUserProfile(u);
+      }
+    });
+
+    return () => unsubscribe();
+  }, []);
+
+  return (
+    <AuthContext.Provider value={{ user, loading }}>
+      {children}
+    </AuthContext.Provider>
+  );
+};
+
 const useAuth = () => useContext(AuthContext);
 
 // Pages placeholder
@@ -163,7 +188,7 @@ const Home = () => {
             <div>
               <h4 className="font-bold text-slate-900 mb-6 uppercase tracking-widest text-sm">Contact Us</h4>
               <div className="flex flex-col gap-6">
-                <a href="tel:+243984149068" className="flex items-center gap-3 text-slate-600 hover:text-orange-600 transition-colors">
+                <a href="tel:+243984149068" className="flex items-center gap-3 text-slate-600 hover:text-orange-600 transition-colors" rel="noopener noreferrer">
                   <div className="w-10 h-10 bg-slate-100 rounded-full flex items-center justify-center">
                     <Phone className="w-5 h-5 text-green-600" />
                   </div>
@@ -173,13 +198,13 @@ const Home = () => {
                   </div>
                 </a>
                 <div className="flex gap-4">
-                  <a href="https://wa.me/243984149068" className="w-12 h-12 bg-slate-100 rounded-full flex items-center justify-center hover:bg-green-500 hover:text-white transition-all">
+                  <a href="https://wa.me/243984149068" target="_blank" rel="noopener noreferrer" className="w-12 h-12 bg-slate-100 rounded-full flex items-center justify-center hover:bg-green-500 hover:text-white transition-all">
                     <MessageSquare className="w-6 h-6" />
                   </a>
-                  <a href="#" className="w-12 h-12 bg-slate-100 rounded-full flex items-center justify-center hover:bg-blue-500 hover:text-white transition-all">
+                  <a href="#" rel="noopener noreferrer" className="w-12 h-12 bg-slate-100 rounded-full flex items-center justify-center hover:bg-blue-500 hover:text-white transition-all">
                     <Globe className="w-6 h-6" />
                   </a>
-                  <a href="#" className="w-12 h-12 bg-slate-100 rounded-full flex items-center justify-center hover:bg-black hover:text-white transition-all">
+                  <a href="#" rel="noopener noreferrer" className="w-12 h-12 bg-slate-100 rounded-full flex items-center justify-center hover:bg-black hover:text-white transition-all">
                     <span className="font-black text-[10px]">TIK</span>
                   </a>
                 </div>
@@ -208,16 +233,28 @@ const Dashboard = () => {
   const [accountType, setAccountType] = useState<"Demo" | "Real">("Real");
   const [subTab, setSubTab] = useState<"Options" | "CFDs">("Options");
   const [balance, setBalance] = useState(200.00);
+  const { user } = useAuth();
+
+  // Fetch real balance from Firestore if user is authenticated
+  useEffect(() => {
+    if (user && accountType === "Real") {
+      getUserProfile().then(profile => {
+        if (profile && typeof profile.balance === 'number') {
+          setBalance(profile.balance);
+        }
+      });
+    }
+  }, [user, accountType]);
 
   // Simulate active balance movement
   useEffect(() => {
+    if (accountType !== "Real") return;
+
     const interval = setInterval(() => {
-      if (accountType === "Real") {
-        setBalance(prev => {
-          const change = (Math.random() - 0.5) * 0.05;
-          return parseFloat((prev + change).toFixed(2));
-        });
-      }
+      setBalance(prev => {
+        const change = (Math.random() - 0.5) * 0.05;
+        return parseFloat((prev + change).toFixed(2));
+      });
     }, 4000);
     return () => clearInterval(interval);
   }, [accountType]);
@@ -1620,7 +1657,7 @@ const ProtectedRoute = ({ children }: { children: React.ReactNode }) => {
         <div className="w-12 h-12 border-4 border-red-600 border-t-transparent rounded-full animate-spin" />
      </div>
   );
-  if (!user) return <Home />;
+  if (!user) return <Navigate to="/signin" replace />;
   return <>{children}</>;
 };
 
@@ -1706,22 +1743,8 @@ const HistoryPage = () => {
 };
 
 export default function App() {
-  const [user, setUser] = useState<User | null>(null);
-  const [loading, setLoading] = useState(true);
-
-  useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, (u) => {
-      setUser(u);
-      setLoading(false);
-      if (u) {
-        ensureUserProfile(u);
-      }
-    });
-    return () => unsubscribe();
-  }, []);
-
   return (
-    <AuthContext.Provider value={{ user, loading }}>
+    <AuthProvider>
     <Router>
       <Layout>
         <Routes>
@@ -1745,8 +1768,22 @@ export default function App() {
                         <label className="text-sm font-bold text-slate-500 mb-2 block">PASSWORD</label>
                         <input type="password" className="w-full px-6 py-4 bg-slate-50 border border-slate-100 rounded-2xl focus:ring-2 focus:ring-orange-500 outline-none transition-all" placeholder="••••••••" />
                      </div>
+                     <button 
+                        type="button"
+                        onClick={async () => {
+                           try {
+                              await loginWithGoogle();
+                           } catch (err) {
+                              console.error(err);
+                           }
+                        }}
+                        className="w-full py-4 bg-slate-900 text-white rounded-2xl font-bold text-center hover:bg-black transition-all shadow-lg flex items-center justify-center gap-2 mb-4"
+                     >
+                        <LogIn className="w-5 h-5" />
+                        Sign in with Google
+                     </button>
                      <Link to="/dashboard" className="w-full block py-4 bg-orange-600 text-white rounded-2xl font-bold text-center hover:bg-orange-700 transition-all shadow-lg shadow-orange-200">
-                        Sign In
+                        Sign In Standard
                      </Link>
                   </form>
                </div>
@@ -1782,7 +1819,7 @@ export default function App() {
           </Routes>
         </Layout>
       </Router>
-    </AuthContext.Provider>
+    </AuthProvider>
   );
 }
 

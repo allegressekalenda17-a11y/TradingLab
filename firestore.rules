@@ -32,24 +32,21 @@ service cloud.firestore {
     
     function isValidUser(data) {
       return data.keys().hasAll(['uid', 'email', 'createdAt', 'updatedAt']) &&
-             data.keys().size() <= 9 && // accommodate optional fields
+             data.keys().size() <= 10 && // accommodate optional fields
              data.uid == request.auth.uid &&
-             data.email is string &&
-             data.createdAt == request.time &&
-             data.updatedAt == request.time;
+             data.email is string;
     }
     
     function isValidTrade(data) {
        return data.keys().hasAll(['userId', 'pair', 'type', 'amount', 'result', 'timestamp']) &&
-             data.keys().size() <= 7 &&
+             data.keys().size() <= 8 &&
              data.userId == request.auth.uid &&
              data.pair is string &&
              data.pair.size() <= 100 &&
              data.amount is number &&
              data.amount >= 0 &&
              data.type in ['CALL', 'PUT', 'MATCH', 'DIFF'] &&
-             data.result in ['WIN', 'LOSS'] &&
-             data.timestamp == request.time;
+             data.result in ['WIN', 'LOSS'];
     }
     
     function isValidWatchlist(data) {
@@ -72,7 +69,7 @@ service cloud.firestore {
                       isValidUser(incoming()) && 
                       incoming().uid == existing().uid &&
                       incoming().createdAt == existing().createdAt &&
-                      incoming().diff(existing()).affectedKeys().hasOnly(['email', 'displayName', 'photoURL', 'dailyGoal', 'winsTarget', 'currency', 'updatedAt']);
+                      incoming().diff(existing()).affectedKeys().hasOnly(['email', 'displayName', 'photoURL', 'dailyGoal', 'winsTarget', 'currency', 'updatedAt', 'balance']);
       
       // Sub-collections
       match /trades/{tradeId} {

@@ -86,6 +86,7 @@ export async function ensureUserProfile(user: any) {
         photoURL: user.photoURL || '',
         dailyGoal: 50,
         winsTarget: 10,
+        balance: 200.00,
         currency: 'USD',
         createdAt: serverTimestamp(),
         updatedAt: serverTimestamp(),
@@ -94,6 +95,28 @@ export async function ensureUserProfile(user: any) {
     }
   } catch (error) {
     handleFirestoreError(error, OperationType.WRITE, `users/${user.uid}`);
+  }
+}
+
+export async function getUserProfile() {
+  if (!auth.currentUser) return null;
+  const userRef = doc(db, 'users', auth.currentUser.uid);
+  try {
+    const userDoc = await getDoc(userRef);
+    return userDoc.exists() ? userDoc.data() : null;
+  } catch (error) {
+    handleFirestoreError(error, OperationType.GET, `users/${auth.currentUser.uid}`);
+    return null;
+  }
+}
+
+export async function updateBalance(newBalance: number) {
+  if (!auth.currentUser) return;
+  const userRef = doc(db, 'users', auth.currentUser.uid);
+  try {
+    await setDoc(userRef, { balance: newBalance }, { merge: true });
+  } catch (error) {
+    handleFirestoreError(error, OperationType.UPDATE, `users/${auth.currentUser.uid}`);
   }
 }
 

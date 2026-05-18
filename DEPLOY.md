@@ -9,14 +9,14 @@ Allez sur [api.deriv.com](https://api.deriv.com/) et connectez-vous.
   - **Redirect URL**
   - **Verification Domain**
 
-## 2. Variables d'Environnement sur Vercel
-Lors du déploiement sur Vercel, ajoutez ces variables dans les paramètres du projet (`Settings` > `Environment Variables`) :
+## 2. Variables d'Environnement
+Lors du déploiement (Cloud Run, Vercel, Render, etc.), ajoutez ces variables dans les paramètres de votre plateforme :
 - `VITE_DERIV_APP_ID` : Votre App ID (ex: `126885`).
+- `NODE_ENV` : Doit être réglé sur `production` pour activer les optimisations de performance et de sécurité.
 
-## 3. Connexion du Robot 🤖
-Si vous avez un jeton (token) pour votre robot :
-- Le jeton ne doit jamais être écrit en clair dans le code.
-- Utilisez les variables d'environnement (`VITE_DERIV_TOKEN`) si vous souhaitez l'intégrer, mais soyez prudent avec la sécurité si le projet est public sur GitHub.
+## 3. Sécurité et Performance
+- Le fichier `.env.example` sert de modèle. Ne commitez jamais votre fichier `.env` réel contenant des secrets.
+- L'App ID est public par nature chez Deriv, mais assurez-vous que les domaines autorisés dans le dashboard Deriv correspondent à votre URL de production.
 
 ## 4. Retirer le projet de GitHub
 Si vous souhaitez supprimer le projet :
