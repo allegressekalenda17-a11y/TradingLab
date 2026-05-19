@@ -15,7 +15,7 @@ service cloud.firestore {
     }
     
     function isValidId(id) {
-      return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+      return id is string && id.size() > 0 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
     }
     
     function incoming() {
@@ -39,14 +39,15 @@ service cloud.firestore {
     
     function isValidTrade(data) {
        return data.keys().hasAll(['userId', 'pair', 'type', 'amount', 'result', 'timestamp']) &&
-             data.keys().size() <= 8 &&
+             data.keys().size() <= 9 &&
              data.userId == request.auth.uid &&
              data.pair is string &&
              data.pair.size() <= 100 &&
              data.amount is number &&
              data.amount >= 0 &&
              data.type in ['CALL', 'PUT', 'MATCH', 'DIFF'] &&
-             data.result in ['WIN', 'LOSS'];
+             data.result in ['WIN', 'LOSS'] &&
+             (data.digitPrediction == null || data.digitPrediction is number);
     }
     
     function isValidWatchlist(data) {
@@ -63,7 +64,7 @@ service cloud.firestore {
 
     // User collection
     match /users/{userId} {
-      allow get: if isOwner(userId);
+      allow read: if isOwner(userId);
       allow create: if isSignedIn() && isValidId(userId) && isValidUser(incoming());
       allow update: if isOwner(userId) && 
                       isValidUser(incoming()) && 
@@ -73,14 +74,13 @@ service cloud.firestore {
       
       // Sub-collections
       match /trades/{tradeId} {
-        allow list: if isOwner(userId);
+        allow read: if isOwner(userId);
         allow create: if isOwner(userId) && isValidId(tradeId) && isValidTrade(incoming());
         // Trades are immutable after generation for integrity
-        allow read: if isOwner(userId);
       }
       
       match /watchlist/default {
-        allow get: if isOwner(userId);
+        allow read: if isOwner(userId);
         allow write: if isOwner(userId) && isValidWatchlist(incoming());
       }
     }

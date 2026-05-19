@@ -11,6 +11,7 @@
         "photoURL": { "type": "string" },
         "dailyGoal": { "type": "number", "description": "Daily profit goal in USD" },
         "winsTarget": { "type": "number", "description": "Target number of wins per session" },
+        "balance": { "type": "number", "description": "Current real account balance" },
         "currency": { "type": "string", "enum": ["USD", "EUR", "GBP"], "description": "Preferred trading currency" },
         "createdAt": { "type": "string", "format": "date-time" },
         "updatedAt": { "type": "string", "format": "date-time" }
