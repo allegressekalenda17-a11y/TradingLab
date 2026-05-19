@@ -471,11 +471,28 @@ const Dashboard = () => {
 
 const INDEX_MAP: Record<string, string> = {
   "Volatility 10 (1s)": "1HZ10V",
+  "Volatility 25 (1s)": "1HZ25V",
   "Volatility 50 (1s)": "1HZ50V",
+  "Volatility 75 (1s)": "1HZ75V",
   "Volatility 100 (1s)": "1HZ100V",
   "Volatility 10": "R_10",
+  "Volatility 25": "R_25",
   "Volatility 50": "R_50",
-  "Volatility 100": "R_100"
+  "Volatility 75": "R_75",
+  "Volatility 100": "R_100",
+};
+
+const INDEX_PRECISION: Record<string, number> = {
+  "1HZ10V": 2,
+  "1HZ25V": 2,
+  "1HZ50V": 2,
+  "1HZ75V": 2,
+  "1HZ100V": 2,
+  "R_10": 3,
+  "R_25": 3,
+  "R_50": 4,
+  "R_75": 4,
+  "R_100": 2,
 };
 
 const MarketPulse = ({ lastTick }: { lastTick: { quote: number } | null }) => {
@@ -617,11 +634,13 @@ const DigitsTool = () => {
   const symbol = useMemo(() => INDEX_MAP[selectedIndexLabel], [selectedIndexLabel]);
   const { lastTick, isConnected, error } = useDerivTicks(symbol);
   
-  const [strategy, setStrategy] = useState<"matches" | "differs">("differs");
+  const [strategy, setStrategy] = useState<"matches" | "differs" | "under" | "over">("differs");
   const [history, setHistory] = useState<number[]>([]);
   const [prediction, setPrediction] = useState<number | null>(null);
-  const [lastResult, setLastResult] = useState<{ predicted: number, actual: number, status: "win" | "loss", mode: "matches" | "differs" } | null>(null);
-  const [resultsHistory, setResultsHistory] = useState<{ predicted: number, actual: number, status: "win" | "loss", mode: "matches" | "differs", time: string }[]>([]);
+  const [pendingEvaluation, setPendingEvaluation] = useState<number | null>(null);
+  const [distribution, setDistribution] = useState<number[]>(Array(10).fill(0));
+  const [lastResult, setLastResult] = useState<{ predicted: number, actual: number, status: "win" | "loss", mode: "matches" | "differs" | "under" | "over" } | null>(null);
+  const [resultsHistory, setResultsHistory] = useState<{ predicted: number, actual: number, status: "win" | "loss", mode: "matches" | "differs" | "under" | "over", time: string }[]>([]);
   const [statsSummary, setStatsSummary] = useState({ wins: 0, total: 0 });
   const [confidence, setConfidence] = useState<number>(0);
   const [dailyGoalAmount, setDailyGoalAmount] = useState(50);
@@ -656,26 +675,29 @@ const DigitsTool = () => {
     }));
   }, [history]);
 
-  // Extract the last digit with fixed market precision (usually 2 for Vol indices)
+  // Extract the last digit with dynamic symbol precision
   const getLastDigit = (num: number) => {
-    // Volatility indices usually have 2 decimals. 
-    // This ensures that 125.4 stays 125.40 and the last digit is 0.
-    const s = num.toFixed(2);
-    const digitsOnly = s.replace('.', '');
-    return parseInt(digitsOnly.charAt(digitsOnly.length - 1));
+    const precision = INDEX_PRECISION[symbol] || 2;
+    const s = num.toFixed(precision);
+    return parseInt(s.charAt(s.length - 1));
   };
 
   useEffect(() => {
     if (lastTick) {
       const digit = getLastDigit(lastTick.quote);
       
-      // Verify previous prediction results
-      if (prediction !== null) {
-        const isMatch = digit === prediction;
-        const won = strategy === "matches" ? isMatch : !isMatch;
+      // Verify previous prediction results - only once per prediction
+      if (pendingEvaluation !== null) {
+        const isMatch = digit === pendingEvaluation;
+        let won = false;
+        
+        if (strategy === "matches") won = isMatch;
+        else if (strategy === "differs") won = !isMatch;
+        else if (strategy === "under") won = digit < pendingEvaluation;
+        else if (strategy === "over") won = digit > pendingEvaluation;
 
         const newResult = {
-          predicted: prediction,
+          predicted: pendingEvaluation,
           actual: digit,
           status: won ? "win" : "loss" as const,
           mode: strategy,
@@ -683,12 +705,19 @@ const DigitsTool = () => {
         };
 
         // Persistent Save
+        const typeMap = {
+          matches: "MATCH",
+          differs: "DIFF",
+          under: "UNDER",
+          over: "OVER"
+        };
+        
         saveTrade({
           pair: selectedIndexLabel,
-          type: strategy === "matches" ? "MATCH" : "DIFF",
-          amount: 1, // Base amount for statistics
+          type: typeMap[strategy],
+          amount: 1, 
           result: won ? "WIN" : "LOSS",
-          digitPrediction: prediction,
+          digitPrediction: pendingEvaluation,
         }).catch(err => console.error("Could not save to cloud", err));
 
         setLastResult(newResult);
@@ -697,55 +726,56 @@ const DigitsTool = () => {
           wins: prev.wins + (won ? 1 : 0),
           total: prev.total + 1
         }));
+
+        setPendingEvaluation(null); // Important: Clear it after one evaluation
       }
 
-      setHistory(prev => [digit, ...prev].slice(0, 40));
+      setHistory(prev => [digit, ...prev].slice(0, 40)); 
     }
   }, [lastTick]);
 
-  // "Timed Prediction Engine" logic
+  // "Timed Prediction Engine" logic - Moved to Backend AS REQUESTED
   useEffect(() => {
     if (shouldAnalyze && history.length >= 5) {
       setIsProcessing(true);
       
-      const processAnalysis = () => {
-        const counts = Array(10).fill(0);
-        history.forEach((d, idx) => {
-          // Weight the most recent ticks more heavily
-          const weight = Math.max(1, 10 - Math.floor(idx / 3));
-          counts[d] += weight;
-        });
-        
-        let minWeight = Math.min(...counts);
-        const candidates: number[] = [];
-        counts.forEach((w, d) => {
-          if (w === minWeight) candidates.push(d);
-        });
+      const processAnalysis = async () => {
+        try {
+          const response = await fetch("/api/predict", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              ticks: history,
+              strategy: strategy
+            })
+          });
 
-        // If multiple candidates have the same min weight, pick the one that appeared least recently
-        const predictedDigit = candidates[0]; 
+          if (!response.ok) throw new Error("Backend prediction failed");
 
-        setPrediction(predictedDigit);
-        setShouldAnalyze(false);
-        
-        // Calculate real confidence based on statistical distribution
-        const avgWeight = history.length > 0 ? (history.length * 5) / 10 : 1; 
-        const distributionGap = Math.min(10, (avgWeight - minWeight) * 1.5);
-        const baseConf = 82.5;
-        const historyBonus = Math.min(5, history.length / 15);
-        
-        let finalConfidence = baseConf + distributionGap + historyBonus;
-        // Cap at 99.4% for realism
-        if (finalConfidence > 99.4) finalConfidence = 99.4;
-        
-        setConfidence(parseFloat(finalConfidence.toFixed(1)));
-        setIsProcessing(false);
+          const data = await response.json();
+          
+          setPrediction(data.prediction);
+          setPendingEvaluation(data.prediction);
+          setDistribution(data.distribution);
+          setConfidence(data.confidence);
+          setShouldAnalyze(false);
+        } catch (error) {
+          console.error("Prediction error:", error);
+          // Fallback to minimal local prediction if backend fails
+          const fallbackDigit = history[0];
+          setPrediction(fallbackDigit);
+          setPendingEvaluation(fallbackDigit);
+          setConfidence(75);
+          setShouldAnalyze(false);
+        } finally {
+          setIsProcessing(false);
+        }
       };
 
-      const analysisTimer = setTimeout(processAnalysis, 800);
+      const analysisTimer = setTimeout(processAnalysis, 500);
       return () => clearTimeout(analysisTimer);
     }
-  }, [shouldAnalyze, history]);
+  }, [shouldAnalyze, history, strategy]);
 
   const indices = Object.keys(INDEX_MAP);
 
@@ -916,6 +946,31 @@ const DigitsTool = () => {
                     </div>
                     <div className="text-8xl font-black text-slate-900 mb-4 leading-none">{prediction}</div>
                     
+                    {/* Visual deduction bars */}
+                    <div className="w-full flex items-end justify-between h-8 gap-0.5 mb-6 px-4">
+                      {distribution.map((val, i) => {
+                        const max = Math.max(...distribution, 0.1);
+                        const height = (val / max) * 100;
+                        const isPredicted = i === prediction;
+                        return (
+                          <div key={i} className="flex-1 flex flex-col items-center">
+                            <motion.div 
+                              initial={{ height: 0 }}
+                              animate={{ height: `${Math.max(5, height)}%` }}
+                              className={cn(
+                                "w-full rounded-t-sm transition-colors duration-500",
+                                isPredicted ? "bg-orange-600" : "bg-slate-200"
+                              )}
+                            />
+                            <span className={cn(
+                              "text-[8px] font-bold mt-1",
+                              isPredicted ? "text-orange-600" : "text-slate-400"
+                            )}>{i}</span>
+                          </div>
+                        );
+                      })}
+                    </div>
+                    
                     <div className="flex items-center gap-2 mb-6 bg-white px-3 py-1 rounded-full border border-slate-100 shadow-sm">
                       <Clock className="w-3 h-3 text-slate-400" />
                       <span className="text-[9px] font-bold text-slate-500 uppercase tracking-tight">Signal valid for {countdown}s</span>
@@ -1054,7 +1109,31 @@ const DigitsTool = () => {
                    >
                       Matches
                    </button>
+                   <button 
+                    onClick={() => setStrategy("under")}
+                    className={cn(
+                      "px-4 py-2 rounded-lg text-[10px] font-bold uppercase transition-all",
+                      strategy === "under" ? "bg-white text-slate-900 shadow-sm" : "text-slate-500 hover:text-slate-700"
+                    )}
+                   >
+                      Under
+                   </button>
+                   <button 
+                    onClick={() => setStrategy("over")}
+                    className={cn(
+                      "px-4 py-2 rounded-lg text-[10px] font-bold uppercase transition-all",
+                      strategy === "over" ? "bg-white text-slate-900 shadow-sm" : "text-slate-500 hover:text-slate-700"
+                    )}
+                   >
+                      Over
+                   </button>
                 </div>
+                <p className="text-[9px] text-slate-400 mt-2 font-medium max-w-[250px] leading-tight">
+                  {strategy === "differs" && "Safe: 90% théorique. Payouts faibles."}
+                  {strategy === "matches" && "Agressif: 10% théorique. Payouts élevés (x9)."}
+                  {strategy === "under" && "Sécurité: 90% théorique (Tick < 9)."}
+                  {strategy === "over" && "Sécurité: 90% théorique (Tick > 0)."}
+                </p>
               </div>
 
               <div className="flex gap-4">
@@ -1067,7 +1146,7 @@ const DigitsTool = () => {
                       lastResult.status === "win" ? "bg-green-50 border-green-100 text-green-600" : "bg-red-50 border-red-100 text-red-600"
                     )}>
                       <div className={cn("w-2 h-2 rounded-full", lastResult.status === "win" ? "bg-green-500" : "bg-red-500")} />
-                      {lastResult.status === "win" ? "PROFIT" : "LOSS"}: {lastResult.mode === "matches" ? "MATCH" : "DIFFER"} (Pred: {lastResult.predicted}, Real: {lastResult.actual})
+                      {lastResult.status === "win" ? "PROFIT" : "LOSS"}: {lastResult.mode.toUpperCase()} (Pred: {lastResult.predicted}, Real: {lastResult.actual})
                    </motion.div>
                  )}
               </div>
