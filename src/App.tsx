@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo, createContext, useContext } from "react";
-import { BrowserRouter as Router, Routes, Route, Link, useLocation, Navigate } from "react-router-dom";
+import { BrowserRouter as Router, Routes, Route, Link, useLocation, Navigate, useNavigate } from "react-router-dom";
 import { 
   BarChart3, 
   Menu, 
@@ -38,7 +38,7 @@ import {
 import { motion, AnimatePresence } from "motion/react";
 import { cn } from "@/src/lib/utils";
 import { useDerivTicks } from "@/src/hooks/useDerivTicks";
-import { auth, loginWithGoogle, logout } from "@/src/lib/firebase";
+import { auth, loginWithGoogle, logout, loginWithEmail, registerWithEmail } from "@/src/lib/firebase";
 import { onAuthStateChanged, User } from "firebase/auth";
 import { ensureUserProfile, saveTrade, getTradeHistory, getUserProfile } from "@/src/lib/firestore";
 
@@ -1415,13 +1415,13 @@ const Layout = ({ children }: { children: React.ReactNode }) => {
                    </button>
                 </div>
               ) : (
-                <button 
-                  onClick={loginWithGoogle}
+                <Link 
+                  to="/signin"
                   className="flex items-center gap-2 px-4 py-2 bg-orange-600 text-white rounded-xl font-bold text-[10px] uppercase tracking-widest hover:bg-orange-700 transition-all shadow-lg shadow-orange-900/20"
                 >
                   <LogIn className="w-4 h-4" />
                   Connect
-                </button>
+                </Link>
               )}
             </div>
           </div>
@@ -1469,12 +1469,13 @@ const Layout = ({ children }: { children: React.ReactNode }) => {
                       </div>
                     </div>
                   ) : (
-                    <button 
-                      onClick={loginWithGoogle}
-                      className="w-full py-4 bg-orange-600 text-white rounded-xl font-bold text-sm"
+                    <Link 
+                      to="/signin"
+                      onClick={() => setIsSidebarOpen(false)}
+                      className="w-full py-4 bg-orange-600 text-white rounded-xl font-bold text-sm block text-center uppercase tracking-wider hover:bg-orange-700 transition-all"
                     >
-                      Login with Google
-                    </button>
+                      Login / Sign Up
+                    </Link>
                   )}
                 </div>
 
@@ -1821,6 +1822,246 @@ const HistoryPage = () => {
   );
 };
 
+const SignInPage = () => {
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [error, setError] = useState("");
+  const [loading, setLoading] = useState(false);
+  const navigate = useNavigate();
+  const { user } = useAuth();
+
+  useEffect(() => {
+    if (user) {
+      navigate("/dashboard");
+    }
+  }, [user, navigate]);
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!email || !password) {
+      setError("Veuillez remplir tous les champs.");
+      return;
+    }
+    setError("");
+    setLoading(true);
+    try {
+      await loginWithEmail(email, password);
+      navigate("/dashboard");
+    } catch (err: any) {
+      console.error(err);
+      if (err.code === "auth/invalid-credential" || err.code === "auth/user-not-found" || err.code === "auth/wrong-password") {
+        setError("Identifiants incorrects. Veuillez vérifier votre email et votre mot de passe.");
+      } else if (err.code === "auth/invalid-email") {
+        setError("Adresse email invalide.");
+      } else {
+        setError(err.message || "Une erreur est survenue lors de la connexion.");
+      }
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleGoogleLogin = async () => {
+    setError("");
+    setLoading(true);
+    try {
+      await loginWithGoogle();
+      navigate("/dashboard");
+    } catch (err: any) {
+      console.error(err);
+      if (err.code === "auth/unauthorized-domain") {
+        setError("Cette URL n'est pas répertoriée comme domaine autorisé dans la console Firebase. Veuillez utiliser la connexion par Email ci-dessous.");
+      } else {
+        setError("Une erreur est survenue lors de la connexion via Google.");
+      }
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <div className="min-h-[80vh] flex items-center justify-center px-6">
+       <div className="w-full max-w-md bg-white p-10 rounded-[40px] shadow-2xl border border-slate-100">
+          <h1 className="text-3xl font-bold text-slate-900 mb-2">Welcome Back</h1>
+          <p className="text-slate-500 mb-6 font-medium">Please enter your details to sign in.</p>
+          
+          {error && (
+            <div className="p-4 mb-6 bg-red-50 text-red-600 text-xs font-bold rounded-2xl border border-red-100 leading-relaxed">
+              {error}
+            </div>
+          )}
+
+          <form onSubmit={handleSubmit} className="space-y-4">
+             <div>
+                <label className="text-xs font-bold text-slate-500 mb-2 block">EMAIL ADDRESS</label>
+                <input 
+                  type="email" 
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  className="w-full px-6 py-4 bg-slate-50 border border-slate-100 rounded-2xl focus:ring-2 focus:ring-orange-500 outline-none transition-all text-sm text-slate-900" 
+                  placeholder="name@example.com" 
+                  required
+                />
+             </div>
+             <div>
+                <label className="text-xs font-bold text-slate-500 mb-2 block">PASSWORD</label>
+                <input 
+                  type="password" 
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  className="w-full px-6 py-4 bg-slate-50 border border-slate-100 rounded-2xl focus:ring-2 focus:ring-orange-500 outline-none transition-all text-sm text-slate-900" 
+                  placeholder="••••••••" 
+                  required
+                />
+             </div>
+             
+             <button 
+                type="submit"
+                disabled={loading}
+                className="w-full py-4 bg-orange-600 text-white rounded-2xl font-bold text-center hover:bg-orange-700 transition-all shadow-lg shadow-orange-200 text-sm flex items-center justify-center gap-2"
+             >
+                {loading ? "Connecting..." : "Sign In with Email"}
+             </button>
+
+             <div className="relative my-6">
+                <div className="absolute inset-0 flex items-center"><span className="w-full border-t border-slate-100"></span></div>
+                <div className="relative flex justify-center text-xs uppercase"><span className="bg-white px-2 text-slate-400 font-bold">Or continue with</span></div>
+             </div>
+
+             <button 
+                type="button"
+                onClick={handleGoogleLogin}
+                disabled={loading}
+                className="w-full py-4 bg-slate-100 text-slate-900 rounded-2xl font-bold text-center hover:bg-slate-200 transition-all shadow-md flex items-center justify-center gap-2 text-xs"
+             >
+                <LogIn className="w-4 h-4 text-orange-600" />
+                Sign in with Google
+             </button>
+
+             <p className="text-center text-xs font-medium text-slate-500 mt-6">
+                Don't have an account?{" "}
+                <Link to="/signup" className="text-orange-600 font-bold hover:underline">
+                  Sign Up
+                </Link>
+             </p>
+          </form>
+       </div>
+    </div>
+  );
+};
+
+const SignUpPage = () => {
+  const [name, setName] = useState("");
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [error, setError] = useState("");
+  const [loading, setLoading] = useState(false);
+  const navigate = useNavigate();
+  const { user } = useAuth();
+
+  useEffect(() => {
+    if (user) {
+      navigate("/dashboard");
+    }
+  }, [user, navigate]);
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!name || !email || !password) {
+      setError("Veuillez remplir tous les champs.");
+      return;
+    }
+    if (password.length < 6) {
+      setError("Le mot de passe doit contenir au moins 6 caractères.");
+      return;
+    }
+    setError("");
+    setLoading(true);
+    try {
+      await registerWithEmail(email, password, name);
+      navigate("/dashboard");
+    } catch (err: any) {
+      console.error(err);
+      if (err.code === "auth/email-already-in-use") {
+        setError("Cet email est déjà utilisé par un autre compte.");
+      } else if (err.code === "auth/invalid-email") {
+        setError("Adresse email invalide.");
+      } else if (err.code === "auth/weak-password") {
+        setError("Le mot de passe est trop faible. Veuillez indiquer au moins 6 caractères.");
+      } else {
+        setError(err.message || "Une erreur est survenue lors de l'inscription.");
+      }
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <div className="min-h-[80vh] flex items-center justify-center px-6">
+       <div className="w-full max-w-md bg-white p-10 rounded-[40px] shadow-2xl border border-slate-100">
+          <h1 className="text-3xl font-bold text-slate-900 mb-2">Create Account</h1>
+          <p className="text-slate-500 mb-6 font-medium">Join TradingLab and start trading smarter.</p>
+          
+          {error && (
+            <div className="p-4 mb-6 bg-red-50 text-red-600 text-xs font-bold rounded-2xl border border-red-100 leading-relaxed">
+              {error}
+            </div>
+          )}
+
+          <form onSubmit={handleSubmit} className="space-y-4">
+             <div>
+                <label className="text-xs font-bold text-slate-500 mb-2 block">FULL NAME</label>
+                <input 
+                  type="text" 
+                  value={name}
+                  onChange={(e) => setName(e.target.value)}
+                  className="w-full px-6 py-4 bg-slate-50 border border-slate-100 rounded-2xl focus:ring-2 focus:ring-orange-500 outline-none transition-all text-sm text-slate-900" 
+                  placeholder="John Doe" 
+                  required
+                />
+             </div>
+             <div>
+                <label className="text-xs font-bold text-slate-500 mb-2 block">EMAIL ADDRESS</label>
+                <input 
+                  type="email" 
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  className="w-full px-6 py-4 bg-slate-50 border border-slate-100 rounded-2xl focus:ring-2 focus:ring-orange-500 outline-none transition-all text-sm text-slate-900" 
+                  placeholder="name@example.com" 
+                  required
+                />
+             </div>
+             <div>
+                <label className="text-xs font-bold text-slate-500 mb-2 block">PASSWORD</label>
+                <input 
+                  type="password" 
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  className="w-full px-6 py-4 bg-slate-50 border border-slate-100 rounded-2xl focus:ring-2 focus:ring-orange-500 outline-none transition-all text-sm text-slate-900" 
+                  placeholder="••••••••" 
+                  required
+                />
+             </div>
+             <button 
+                type="submit"
+                disabled={loading}
+                className="w-full py-4 bg-orange-600 text-white rounded-2xl font-bold text-center hover:bg-orange-700 transition-all shadow-lg shadow-orange-200 text-sm flex items-center justify-center"
+             >
+                {loading ? "Creating account..." : "Create Account"}
+             </button>
+
+             <p className="text-center text-xs font-medium text-slate-500 mt-6">
+                Already have an account?{" "}
+                <Link to="/signin" className="text-orange-600 font-bold hover:underline">
+                  Sign In
+                </Link>
+             </p>
+          </form>
+       </div>
+    </div>
+  );
+};
+
 export default function App() {
   return (
     <AuthProvider>
@@ -1833,71 +2074,13 @@ export default function App() {
           <Route path="/signals" element={<ProtectedRoute><TradingSignals /></ProtectedRoute>} />
           <Route path="/history" element={<ProtectedRoute><HistoryPage /></ProtectedRoute>} />
           <Route path="/settings" element={<ProtectedRoute><Settings /></ProtectedRoute>} />
-          <Route path="/signin" element={
-            <div className="min-h-[80vh] flex items-center justify-center px-6">
-               <div className="w-full max-w-md bg-white p-10 rounded-[40px] shadow-2xl border border-slate-100">
-                  <h1 className="text-3xl font-bold text-slate-900 mb-2">Welcome Back</h1>
-                  <p className="text-slate-500 mb-8 font-medium">Please enter your details to sign in.</p>
-                  <form className="space-y-6">
-                     <div>
-                        <label className="text-sm font-bold text-slate-500 mb-2 block">EMAIL ADDRESS</label>
-                        <input type="email" className="w-full px-6 py-4 bg-slate-50 border border-slate-100 rounded-2xl focus:ring-2 focus:ring-orange-500 outline-none transition-all" placeholder="name@example.com" />
-                     </div>
-                     <div>
-                        <label className="text-sm font-bold text-slate-500 mb-2 block">PASSWORD</label>
-                        <input type="password" className="w-full px-6 py-4 bg-slate-50 border border-slate-100 rounded-2xl focus:ring-2 focus:ring-orange-500 outline-none transition-all" placeholder="••••••••" />
-                     </div>
-                     <button 
-                        type="button"
-                        onClick={async () => {
-                           try {
-                              await loginWithGoogle();
-                           } catch (err) {
-                              console.error(err);
-                           }
-                        }}
-                        className="w-full py-4 bg-slate-900 text-white rounded-2xl font-bold text-center hover:bg-black transition-all shadow-lg flex items-center justify-center gap-2 mb-4"
-                     >
-                        <LogIn className="w-5 h-5" />
-                        Sign in with Google
-                     </button>
-                     <Link to="/dashboard" className="w-full block py-4 bg-orange-600 text-white rounded-2xl font-bold text-center hover:bg-orange-700 transition-all shadow-lg shadow-orange-200">
-                        Sign In Standard
-                     </Link>
-                  </form>
-               </div>
-            </div>
-          } />
-          <Route path="/signup" element={
-            <div className="min-h-[80vh] flex items-center justify-center px-6">
-               <div className="w-full max-w-md bg-white p-10 rounded-[40px] shadow-2xl border border-slate-100">
-                  <h1 className="text-3xl font-bold text-slate-900 mb-2">Create Account</h1>
-                  <p className="text-slate-500 mb-8 font-medium">Join TradingLab and start trading smarter.</p>
-                  <form className="space-y-6">
-                     <div>
-                        <label className="text-sm font-bold text-slate-500 mb-2 block">FULL NAME</label>
-                        <input type="text" className="w-full px-6 py-4 bg-slate-50 border border-slate-100 rounded-2xl focus:ring-2 focus:ring-orange-500 outline-none transition-all" placeholder="John Doe" />
-                     </div>
-                     <div>
-                        <label className="text-sm font-bold text-slate-500 mb-2 block">EMAIL ADDRESS</label>
-                        <input type="email" className="w-full px-6 py-4 bg-slate-50 border border-slate-100 rounded-2xl focus:ring-2 focus:ring-orange-500 outline-none transition-all" placeholder="name@example.com" />
-                     </div>
-                     <div>
-                        <label className="text-sm font-bold text-slate-500 mb-2 block">PASSWORD</label>
-                        <input type="password" className="w-full px-6 py-4 bg-slate-50 border border-slate-100 rounded-2xl focus:ring-2 focus:ring-orange-500 outline-none transition-all" placeholder="••••••••" />
-                     </div>
-                     <Link to="/dashboard" className="w-full block py-4 bg-orange-600 text-white rounded-2xl font-bold text-center hover:bg-orange-700 transition-all shadow-lg shadow-orange-200">
-                        Create Account
-                     </Link>
-                  </form>
-               </div>
-            </div>
-          } />
-            <Route path="/terms" element={<TermsPage />} />
-            <Route path="*" element={<Navigate to="/" replace />} />
-          </Routes>
-        </Layout>
-      </Router>
+          <Route path="/signin" element={<SignInPage />} />
+          <Route path="/signup" element={<SignUpPage />} />
+          <Route path="/terms" element={<TermsPage />} />
+          <Route path="*" element={<Navigate to="/" replace />} />
+        </Routes>
+      </Layout>
+    </Router>
     </AuthProvider>
   );
 }

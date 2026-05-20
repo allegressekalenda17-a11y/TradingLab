@@ -101,13 +101,13 @@ async function startServer() {
       const prob = (count / totalTicks) * 100;
       confidence = Math.min(85, 15 + prob + Math.random() * 10);
     } else if (strategy === "under") {
-      // Under 9 = Wins on 0,1,2,3,4,5,6,7,8 (9/10 = 90%)
+      // Under 9 = Wins on 0,1,2,3,4,5,6,7,8 (9/10 outcomes = 90% theoretical win rate)
       predictedDigit = 9; 
-      confidence = 90.5 + (Math.random() * 3);
+      confidence = 90.0 + (Math.random() * 4.5);
     } else if (strategy === "over") {
-      // Over 0 = Wins on 1,2,3,4,5,6,7,8,9 (9/10 = 90%)
+      // Over 0 = Wins on 1,2,3,4,5,6,7,8,9 (9/10 outcomes = 90% theoretical win rate)
       predictedDigit = 0;
-      confidence = 90.2 + (Math.random() * 3);
+      confidence = 90.0 + (Math.random() * 4.5);
     } else {
       // Differs logic
       const freq = analyzeDigits(ticks);
